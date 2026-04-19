@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-CAD 工作台</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <style>
+    :root{--bg:#1e1f22;--panel:#2a2c31;--panel2:#161719;--primary:#54c38e;--text:#eef2f6;--muted:#a5aeb8;--border:#3a3d42;--danger:#ef6262;--info:#5ba4ff}
+    *{box-sizing:border-box} html,body{width:100%;height:100%} body{margin:0;background:radial-gradient(circle at top right,rgba(84,195,142,.15),transparent 28%),var(--bg);color:var(--text);font-family:"Segoe UI","Microsoft YaHei",sans-serif;overflow:hidden}
+    .app{display:grid;grid-template-columns:minmax(320px,28%) 1fr;height:100dvh}.side{display:flex;flex-direction:column;background:rgba(42,44,49,.96);border-right:1px solid var(--border);overflow:hidden}.main{position:relative}
+    .header{padding:20px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,rgba(84,195,142,.18),rgba(91,164,255,.08))}.header h2{margin:0;font-size:22px}.header p{margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--muted)}
+    .tabs{display:flex;border-bottom:1px solid var(--border);background:#151617}.tab{flex:1;padding:14px 12px;text-align:center;cursor:pointer;font-weight:700;border-bottom:2px solid transparent}.tab.active{color:var(--primary);border-bottom-color:var(--primary);background:rgba(84,195,142,.06)}
+    .content{flex:1;overflow:auto;padding:16px}.panel,.card,.pill,.item,.log{border:1px solid var(--border);border-radius:12px}.panel{padding:14px;margin-bottom:14px;background:rgba(22,23,25,.76)}.card{padding:12px;background:rgba(84,195,142,.10)}.pill{padding:10px;background:rgba(255,255,255,.03)}.pill.ok{border-color:rgba(84,195,142,.3)}.pill.bad{border-color:rgba(239,98,98,.3)}.log{padding:12px;background:var(--panel2)}.item{padding:12px;background:rgba(255,255,255,.02);margin-top:10px}
+    .row,.between,.tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.between{justify-content:space-between}.tools{justify-content:flex-end}.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .title{margin:0 0 8px;font-size:15px;font-weight:700}.muted,.sub{font-size:12px;line-height:1.6;color:var(--muted)}.label{font-size:12px;color:var(--muted);margin-bottom:6px}.value{font-size:24px;font-weight:700}.json{white-space:pre-wrap;word-break:break-word;font-family:Consolas,monospace;font-size:12px;color:#d9b287}.tag{display:inline-flex;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(255,255,255,.08)}.tag.active{background:rgba(84,195,142,.16);color:var(--primary)}
+    input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel2);color:var(--text);font:inherit} textarea{min-height:132px;resize:vertical}
+    .grow{flex:2 1 45%}.w120{flex:1 1 24%}
+    .btn,.btn2,.btn3{border:none;border-radius:10px;cursor:pointer;font:inherit}.btn{width:100%;padding:12px;background:linear-gradient(135deg,var(--primary),#7bd4ad);font-weight:700;color:#0d2b20}.btn:disabled{background:#5b5f65;color:#a0a7b0;cursor:not-allowed}.btn2{padding:10px 12px;border:1px solid var(--border);background:rgba(255,255,255,.05);color:var(--text)}.btn3{padding:8px 12px;font-size:12px;font-weight:700;color:var(--primary);background:transparent;border:1px solid rgba(84,195,142,.35)}.btn3.info{color:var(--info);border-color:rgba(91,164,255,.35)}.btn3.delete{color:var(--danger);border-color:rgba(239,98,98,.35)}
+    #loading{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(20,20,20,.82);color:var(--primary);font-weight:700}.spinner{width:42px;height:42px;border-radius:50%;border:4px solid rgba(84,195,142,.24);border-top-color:var(--primary);animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+    @media (max-width:980px){.app{grid-template-columns:1fr}.side{max-height:55dvh}.main{min-height:45dvh}}
+  </style>
+  <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.146.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.146.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="app" class="app">
+  <div class="side">
+    <div class="header"><h2>AI-CAD 工作台</h2><p>适合 Cloudflare Tunnel 的公开演示版，支持数据库保存 API Key。</p></div>
+    <div class="tabs">
+      <div class="tab" :class="{active:tab==='workspace'}" @click="tab='workspace'">工作台</div>
+      <div class="tab" v-if="runtime.show_history" :class="{active:tab==='history'}" @click="openHistory">历史</div>
+    </div>
+    <div class="content" v-show="tab==='workspace'">
+      <div class="panel">
+        <div class="between"><div><div class="title">系统概览</div><div class="sub">服务状态、演示模式和 LLM 配置。</div></div><div class="tools"><button class="btn3" @click="refreshAll">刷新</button></div></div>
+        <div class="grid2" style="margin-top:12px">
+          <div class="card"><div class="label">总生成次数</div><div class="value">{{ stats.total_count }}</div></div>
+          <div class="card"><div class="label">成功率</div><div class="value">{{ stats.success_rate }}%</div></div>
+          <div class="card"><div class="label">今日新增</div><div class="value">{{ stats.today_count }}</div></div>
+          <div class="card"><div class="label">模型文件数</div><div class="value">{{ stats.model_file_count }}</div></div>
+        </div>
+        <div class="grid2" style="margin-top:12px">
+          <div class="pill" :class="serviceClass(health.services.database && health.services.database.ok)"><div class="label">数据库</div><div>{{ serviceText(health.services.database && health.services.database.ok) }}</div></div>
+          <div class="pill" :class="serviceClass(health.services.llm && health.services.llm.ok)"><div class="label">LLM</div><div>{{ serviceText(health.services.llm && health.services.llm.ok) }}</div></div>
+          <div class="pill" :class="serviceClass(health.services.cad_engine && health.services.cad_engine.available)"><div class="label">CAD 引擎</div><div>{{ serviceText(health.services.cad_engine && health.services.cad_engine.available) }}</div></div>
+          <div class="pill" :class="serviceClass(health.services.static_dir && health.services.static_dir.ok)"><div class="label">静态目录</div><div>{{ serviceText(health.services.static_dir && health.services.static_dir.ok) }}</div></div>
+        </div>
+        <div class="log" style="margin-top:12px">
+          <div class="title">LLM 配置</div>
+          <div class="muted">来源：{{ llm.source || 'missing' }} ｜ 提供商：{{ llm.configured ? (llm.provider || '未识别') : '未设置' }} ｜ 模型：{{ llm.configured ? (llm.model || '未识别') : '未设置' }}</div>
+          <div class="muted" style="margin-top:6px">接口：{{ llm.configured ? (llm.api_base_url || '未设置') : '未设置' }} ｜ Key：{{ llm.masked_api_key || '未设置' }}</div>
+          <div class="row" style="margin-top:10px">
+            <input class="grow" v-model.trim="llmForm.apiKey" type="password" placeholder="只输入 API Key，系统会自动识别厂商、接口地址和模型">
+            <input class="w120" v-model.trim="llmForm.adminCode" type="password" placeholder="管理口令">
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn3 info" @click="saveApiKey">保存配置</button>
+            <button class="btn3 delete" @click="clearApiKey">清除 Key</button>
+            <button class="btn3" @click="fetchLlm">刷新状态</button>
+          </div>
+        </div>
+        <div class="log" style="margin-top:12px" v-if="runtime.demo_mode">
+          <div class="title">Public Demo</div>
+          <div class="muted">名称：{{ runtime.demo_name }} ｜ 生成：{{ runtime.allow_generate ? '开' : '关' }} ｜ 下载：{{ runtime.allow_download ? '开' : '关' }} ｜ 删除：{{ runtime.allow_delete ? '开' : '关' }}</div>
+          <div class="muted" style="margin-top:8px">限流：{{ runtime.rate_limit_max_requests }} 次 / {{ runtime.rate_limit_window_seconds }} 秒，指令上限 {{ runtime.max_instruction_length }}。</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="between"><div><div class="title">模板库</div><div class="sub">筛选模板并直接运行。</div></div><div class="tools"><button class="btn3" @click="fetchTemplates">刷新模板</button></div></div>
+        <div class="row" style="margin-top:10px">
+          <select class="w120" v-model="templateFilters.category" @change="fetchTemplates"><option value="all">全部分类</option><option value="basic">基础体</option><option value="machining">加工特征</option><option value="assembly">装配结构</option><option value="layout">空间布局</option><option value="boolean">布尔运算</option></select>
+          <input class="grow" v-model.trim="templateFilters.keyword" placeholder="搜索模板关键词">
+          <button class="btn3" @click="fetchTemplates">筛选</button>
+        </div>
+        <div v-if="templates.length===0" class="sub" style="margin-top:12px">当前没有可用模板。</div>
+        <div class="item" v-for="template in templates" :key="template.id">
+          <div class="between"><strong>{{ template.name }}</strong><div class="row"><span class="tag">{{ template.category_label }}</span><span class="tag">{{ template.difficulty }}</span></div></div>
+          <div class="muted" style="margin:6px 0">{{ template.summary }}</div>
+          <div class="json">{{ template.instruction }}</div>
+          <div class="row" style="margin-top:10px"><button class="btn3" @click="applyTemplate(template)">填充</button><button class="btn3 info" @click="runTemplate(template)" :disabled="!runtime.allow_generate">直接运行</button></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="between"><div><div class="title">智能建模输入区</div><div class="sub">支持自由输入、模板带入和历史复用。</div></div><span class="tag active" v-if="activeTemplateId">当前模板：{{ activeTemplateId }}</span></div>
+        <textarea v-model="instruction" placeholder="例如：创建一个长80宽50高30的长方体，在顶部中心打一个半径10深20的圆孔。"></textarea>
+        <button class="btn" @click="generate()" :disabled="loading || !runtime.allow_generate"><span v-if="!loading">开始生成模型</span><span v-else>正在执行语义解析与建模...</span></button>
+        <div class="row" style="margin-top:10px"><button class="btn2" @click="resetInstruction">清空输入</button><button class="btn2" @click="refreshAll">同步概览与历史</button></div>
+        <div class="log" style="margin-top:12px"><div class="title">系统日志</div><div class="muted">{{ status }}</div><div class="json" v-if="parsed">{{ parsed }}</div></div>
+      </div>
+    </div>
+
+    <div class="content" v-if="runtime.show_history" v-show="tab==='history'">
+      <div class="panel">
+        <div class="between"><div><div class="title">历史记录</div><div class="sub">可复用历史指令，再次生成或查看模型。</div></div><button class="btn3" @click="resetHistory">重置</button></div>
+        <div class="row" style="margin-top:10px"><input class="grow" v-model.trim="historyFilters.keyword" placeholder="按指令内容搜索"><select class="w120" v-model="historyFilters.status"><option value="all">全部状态</option><option value="success">仅成功</option><option value="error">仅失败</option></select><select class="w120" v-model.number="historyFilters.limit"><option :value="20">20 条</option><option :value="50">50 条</option><option :value="100">100 条</option></select><button class="btn3" @click="fetchHistory">应用</button></div>
+      </div>
+      <div v-if="history.length===0" class="sub">当前没有符合条件的历史记录。</div>
+      <div class="item" v-for="item in history" :key="item.id">
+        <div class="between muted"><span>#{{ item.id }} · {{ formatDate(item.created_at) }}</span><span class="tag" :class="{active:isSuccess(item)}">{{ isSuccess(item) ? '成功' : '失败' }}</span></div>
+        <div class="row" style="margin-top:8px" v-if="item.template_id || item.source_record_id"><span class="tag" v-if="item.template_id">模板：{{ item.template_id }}</span><span class="tag" v-if="item.source_record_id">来源：{{ item.source_record_id }}</span></div>
+        <div style="margin-top:8px">{{ item.instruction }}</div>
+        <div class="row" style="margin-top:10px"><button class="btn3" @click="reuseHistory(item)">复用</button><button class="btn3 info" @click="rerun(item)" :disabled="!runtime.allow_generate">再次生成</button><button class="btn3" v-if="isSuccess(item)" @click="loadHistoryModel(item.file_path)">渲染模型</button><button class="btn3 info" v-if="isSuccess(item) && runtime.allow_download" @click="download(item.file_path,item.id)">导出 STL</button><button class="btn3" @click="toggleDetail(item.id)">{{ expandedId===item.id ? '收起详情' : '查看详情' }}</button><button class="btn3 delete" v-if="runtime.allow_delete" @click="removeHistory(item.id)">删除</button></div>
+        <div class="log" style="margin-top:10px" v-if="expandedId===item.id"><div class="muted">状态：{{ item.status }}</div><div class="muted">文件：{{ item.file_path || '无' }}</div><div class="json" v-if="item.parsed_json">{{ pretty(item.parsed_json_obj || item.parsed_json) }}</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main" id="viewer"><div id="loading" v-show="rendering"><div class="spinner"></div><div>正在进行 3D 渲染...</div></div></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const { createApp, reactive, ref, onMounted } = Vue;
+const API_BASE = window.location.protocol.startsWith('http') ? window.location.origin : 'http://127.0.0.1:5001';
+const qs = new URLSearchParams(window.location.search);
+const demoAccessCode = qs.get('demo_access_code') || localStorage.getItem('demo_access_code') || '';
+if (demoAccessCode) localStorage.setItem('demo_access_code', demoAccessCode);
+const http = axios.create({ baseURL: API_BASE });
+http.interceptors.request.use((config) => { const next = { ...config, headers: { ...(config.headers || {}) } }; if (demoAccessCode) next.headers['X-Demo-Access-Code'] = demoAccessCode; return next; });
+
+createApp({
+  setup() {
+    const tab = ref('workspace');
+    const instruction = ref('');
+    const activeTemplateId = ref('');
+    const loading = ref(false);
+    const rendering = ref(false);
+    const parsed = ref('');
+    const status = ref('系统就绪，等待指令输入。');
+    const history = ref([]);
+    const templates = ref([]);
+    const expandedId = ref(null);
+    const runtime = reactive({ demo_mode: false, demo_name: '', show_history: true, allow_generate: true, allow_delete: false, allow_download: true, max_instruction_length: 0, rate_limit_window_seconds: 0, rate_limit_max_requests: 0 });
+    const health = ref({ services: { database: { ok: false }, llm: { ok: false }, cad_engine: { available: false }, static_dir: { ok: false } } });
+    const stats = ref({ total_count: 0, today_count: 0, success_rate: 0, model_file_count: 0, regenerated_count: 0, top_template_id: '' });
+    const llm = reactive({ ok: false, configured: false, source: 'missing', provider: '', api_base_url: '', model: '', masked_api_key: '', can_manage: false });
+    const llmForm = reactive({ apiKey: '', adminCode: '' });
+    const templateFilters = reactive({ category: 'all', keyword: '' });
+    const historyFilters = reactive({ keyword: '', status: 'all', limit: 50 });
+    let scene, camera, renderer, controls, currentMesh, resizeObserver, currentObjectUrl = '';
+
+    const serviceClass = (ok) => ok ? 'ok' : 'bad';
+    const serviceText = (ok) => ok ? '在线' : '异常';
+    const isSuccess = (item) => item.status === 'success';
+    const pretty = (payload) => { if (!payload) return ''; if (typeof payload === 'string') { try { return JSON.stringify(JSON.parse(payload), null, 2); } catch { return payload; } } try { return JSON.stringify(payload, null, 2); } catch { return String(payload); } };
+    const adminHeaders = () => llmForm.adminCode ? { 'X-Admin-Access-Code': llmForm.adminCode } : {};
+
+    const init3d = () => {
+      const container = document.getElementById('viewer');
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x171717);
+      camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 4000);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.shadowMap.enabled = true;
+      container.appendChild(renderer.domElement);
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+      const light = new THREE.DirectionalLight(0xffffff, 1.2);
+      light.position.set(120, 220, 120);
+      scene.add(light);
+      scene.add(new THREE.DirectionalLight(0x4fc08d, 0.5).position.set(-140, -80, -80));
+      const grid = new THREE.GridHelper(400, 80, 0x4fc08d, 0x2f2f2f);
+      grid.position.y = -0.1;
+      grid.material.opacity = 0.45;
+      grid.material.transparent = true;
+      scene.add(grid);
+      const animate = () => { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); };
+      animate();
+      const sync = () => { if (!container.clientWidth || !container.clientHeight) return; camera.aspect = container.clientWidth / container.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight); };
+      sync();
+      window.addEventListener('resize', sync);
+      resizeObserver = new ResizeObserver(sync);
+      resizeObserver.observe(container);
+    };
+
+    const fetchPublic = async () => { const r = await http.get('/api/public-config'); if (r.data.status === 'success') Object.assign(runtime, r.data.data || {}); if (!runtime.show_history && tab.value === 'history') tab.value = 'workspace'; };
+    const fetchHealth = async () => { const r = await http.get('/api/health'); if (r.data.status === 'success') { health.value = r.data; Object.assign(runtime, r.data.runtime || {}); Object.assign(llm, r.data.services?.llm || {}); } };
+    const fetchStats = async () => { const r = await http.get('/api/stats'); if (r.data.status === 'success') stats.value = r.data.data; };
+    const fetchTemplates = async () => { const r = await http.get('/api/templates', { params: { category: templateFilters.category, keyword: templateFilters.keyword } }); if (r.data.status === 'success') templates.value = r.data.data; };
+    const fetchHistory = async () => { if (!runtime.show_history) { history.value = []; return; } const r = await http.get('/api/history', { params: { keyword: historyFilters.keyword, status: historyFilters.status, limit: historyFilters.limit } }); if (r.data.status === 'success') history.value = r.data.data; };
+    const fetchLlm = async () => {
+      const r = await http.get('/api/settings/llm');
+      if (r.data.status === 'success') Object.assign(llm, r.data.data || {});
+    };
+
+    const refreshAll = async () => { try { await Promise.all([fetchPublic(), fetchHealth(), fetchStats(), fetchTemplates(), fetchHistory(), fetchLlm()]); } catch (e) { status.value = e.response?.data?.message || '刷新失败。'; } };
+    const saveApiKey = async () => {
+      if (!llmForm.apiKey) { status.value = '请先输入要保存的 API Key。'; return; }
+      try {
+        const r = await http.post('/api/settings/llm', { api_key: llmForm.apiKey }, { headers: adminHeaders() });
+        if (r.data.status === 'success') {
+          llmForm.apiKey = '';
+          Object.assign(llm, r.data.data || {});
+          await fetchHealth();
+          status.value = 'LLM 配置已自动识别并保存。';
+        }
+      } catch (e) { status.value = e.response?.data?.message || '保存 LLM 配置失败。'; }
+    };
+    const clearApiKey = async () => { try { const r = await http.post('/api/settings/llm', { clear: true }, { headers: adminHeaders() }); if (r.data.status === 'success') { Object.assign(llm, r.data.data || {}); await fetchHealth(); status.value = '数据库中的 LLM API Key 已清除。'; } } catch (e) { status.value = e.response?.data?.message || '清除 API Key 失败。'; } };
+    const applyTemplate = (t) => { instruction.value = t.instruction; activeTemplateId.value = t.id; parsed.value = ''; status.value = `已载入模板“${t.name}”。`; };
+    const runTemplate = async (t) => { applyTemplate(t); await generate({ instruction: t.instruction, templateId: t.id }); };
+    const resetInstruction = () => { instruction.value = ''; activeTemplateId.value = ''; parsed.value = ''; status.value = '输入区已清空。'; };
+    const openHistory = async () => { tab.value = 'history'; await fetchHistory(); };
+    const resetHistory = async () => { historyFilters.keyword = ''; historyFilters.status = 'all'; historyFilters.limit = 50; expandedId.value = null; await fetchHistory(); };
+
+    const generate = async (options = {}) => {
+      if (!runtime.allow_generate) { status.value = '当前公开演示已关闭生成功能。'; return; }
+      const finalInstruction = (typeof options.instruction === 'string' ? options.instruction : instruction.value).trim();
+      const templateId = typeof options.templateId === 'string' ? options.templateId : activeTemplateId.value;
+      const sourceRecordId = Object.prototype.hasOwnProperty.call(options, 'sourceRecordId') ? options.sourceRecordId : null;
+      if (!finalInstruction && !templateId) { status.value = '请输入建模指令或先选择模板。'; return; }
+      instruction.value = finalInstruction;
+      loading.value = true;
+      parsed.value = '';
+      status.value = '请求已发送，正在执行语义解析与建模。';
+      try {
+        const r = await http.post('/api/generate', { instruction: finalInstruction, template_id: templateId, source_record_id: sourceRecordId });
+        const data = r.data;
+        if (data.status === 'success') {
+          activeTemplateId.value = data.template_id || templateId || '';
+          parsed.value = pretty(data.parsed_params);
+          status.value = `建模完成，记录编号 #${data.record_id}，正在加载三维模型。`;
+          loadStl(data.model_url);
+          await Promise.all([fetchHistory(), fetchStats(), fetchHealth()]);
+        } else status.value = `后端异常：${data.message}`;
+      } catch (e) {
+        status.value = `通信失败：${e.response?.data?.message || '请检查后端服务是否已启动。'}`;
+      } finally { loading.value = false; }
+    };
+
+    const loadStl = async (url) => {
+      rendering.value = true;
+      const loader = new STLLoader();
+      const normalized = url.startsWith('http') ? url : `${API_BASE}${url}`;
+      const requestUrl = `${normalized}${normalized.includes('?') ? '&' : '?'}t=${Date.now()}`;
+      try {
+        const response = await fetch(requestUrl, {
+          headers: demoAccessCode ? { 'X-Demo-Access-Code': demoAccessCode } : {},
+          credentials: 'same-origin'
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const buffer = await response.arrayBuffer();
+        if (!buffer.byteLength) {
+          throw new Error('empty STL response');
+        }
+
+        const geometry = loader.parse(buffer);
+        if (currentMesh) {
+          scene.remove(currentMesh);
+          currentMesh.geometry.dispose();
+          currentMesh.material.dispose();
+        }
+        if (currentObjectUrl) {
+          URL.revokeObjectURL(currentObjectUrl);
+          currentObjectUrl = '';
+        }
+
+        geometry.computeVertexNormals();
+        currentMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x4fc08d, metalness: 0.3, roughness: 0.4 }));
+        currentMesh.rotation.x = -Math.PI / 2;
+        scene.add(currentMesh);
+        const box = new THREE.Box3().setFromObject(currentMesh);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z) || 50;
+        camera.position.set(center.x + maxDim * 1.5, center.y + maxDim * 1.2, center.z + maxDim * 1.5);
+        camera.lookAt(center);
+        controls.target.copy(center);
+        controls.update();
+        status.value = '渲染完成，当前模型已加载到右侧三维视图。';
+      } catch (error) {
+        console.error('STL load failed:', error);
+        status.value = `模型加载失败：${error.message || '未知错误'}`;
+      } finally {
+        rendering.value = false;
+      }
+    };
+
+    const reuseHistory = (item) => { instruction.value = item.instruction || ''; activeTemplateId.value = item.template_id || ''; parsed.value = pretty(item.parsed_json_obj || item.parsed_json); tab.value = 'workspace'; status.value = `已载入历史记录 #${item.id}。`; };
+    const rerun = async (item) => { reuseHistory(item); await generate({ instruction: item.instruction, templateId: item.template_id || '', sourceRecordId: item.id }); };
+    const loadHistoryModel = (path) => { if (!path) { status.value = '当前记录没有可用的模型文件。'; return; } loadStl(path); };
+    const toggleDetail = (id) => { expandedId.value = expandedId.value === id ? null : id; };
+    const removeHistory = async (id) => { if (!runtime.allow_delete) { status.value = '公开演示下已禁用删除功能。'; return; } if (!confirm('确定要永久删除这条历史记录吗？')) return; try { const r = await http.delete(`/api/history/${id}`); if (r.data.status === 'success') { if (expandedId.value === id) expandedId.value = null; status.value = `历史记录 #${id} 已删除。`; await Promise.all([fetchHistory(), fetchStats(), fetchHealth()]); } else status.value = `删除失败：${r.data.message}`; } catch (e) { status.value = `删除失败：${e.response?.data?.message || '请检查后端服务。'}`; } };
+    const download = (path, id) => { if (!runtime.allow_download) { status.value = '公开演示下已禁用下载功能。'; return; } const code = demoAccessCode ? `&demo_access_code=${encodeURIComponent(demoAccessCode)}` : ''; const a = document.createElement('a'); a.href = `${API_BASE}/api/download?path=${encodeURIComponent(path)}${code}`; a.setAttribute('download', `AI_Model_${id}.stl`); document.body.appendChild(a); a.click(); document.body.removeChild(a); };
+    const formatDate = (dateStr) => { if (!dateStr) return ''; const date = new Date(dateStr); return `${date.getMonth() + 1}-${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`; };
+
+    onMounted(async () => { init3d(); await refreshAll(); });
+
+    return { activeTemplateId, applyTemplate, clearApiKey, download, expandedId, fetchHistory, fetchLlm, fetchTemplates, formatDate, generate, health, history, historyFilters, instruction, isSuccess, llm, llmForm, loadHistoryModel, loading, openHistory, parsed, pretty, refreshAll, removeHistory, rendering, resetHistory, resetInstruction, rerun, runTemplate, runtime, saveApiKey, serviceClass, serviceText, stats, status, tab, templateFilters, templates, toggleDetail, reuseHistory };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
