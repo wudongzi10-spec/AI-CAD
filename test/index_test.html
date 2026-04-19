@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>基于大模型的CAD自动建模系统</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        /* 深色工业风 UI 设计 */
+        body { font-family: 'Microsoft YaHei', sans-serif; margin: 0; display: flex; height: 100vh; background-color: #1e1e1e; color: #fff; overflow: hidden; }
+        #sidebar { width: 350px; padding: 25px; background-color: #252526; box-shadow: 3px 0 10px rgba(0,0,0,0.5); display: flex; flex-direction: column; z-index: 10; }
+        #viewer { flex: 1; position: relative; }
+        h2 { margin-top: 0; color: #4fc08d; font-size: 22px; border-bottom: 1px solid #333; padding-bottom: 15px; }
+        textarea { width: 100%; height: 110px; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; padding: 12px; border-radius: 6px; resize: none; font-size: 15px; box-sizing: border-box; }
+        textarea:focus { outline: none; border-color: #4fc08d; }
+        button { background-color: #4fc08d; color: #1e1e1e; border: none; padding: 12px; cursor: pointer; margin-top: 15px; border-radius: 6px; font-weight: bold; font-size: 16px; transition: background 0.3s; }
+        button:hover { background-color: #3da877; }
+        button:disabled { background-color: #555; color: #888; cursor: not-allowed; }
+        .log-box { margin-top: 25px; flex: 1; overflow-y: auto; font-size: 14px; background: #1e1e1e; padding: 15px; border: 1px solid #333; border-radius: 6px; }
+        .status-text { color: #569cd6; font-weight: bold; margin-bottom: 10px;}
+        .json-block { color: #ce9178; font-family: Consolas, monospace; white-space: pre-wrap; margin-top: 10px; }
+    </style>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.146.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.146.0/examples/jsm/"
+        }
+      }
+    </script>
+</head>
+<body>
+    <div id="app" style="display: flex; width: 100%; height: 100%;">
+        <div id="sidebar">
+            <h2>💻 AI 智能 CAD 助手</h2>
+            <p style="color: #aaa; font-size: 14px;">请输入自然语言设计指令：</p>
+            <textarea v-model="instruction" placeholder="例如：帮我画一个高为120，底面半径是25的圆柱体。"></textarea>
+            <button @click="generateCAD" :disabled="loading">{{ loading ? '🧠 AI 正在思考与建模...' : '🚀 提交生成指令' }}</button>
+
+            <div class="log-box">
+                <div class="status-text">实时状态：{{ statusMsg }}</div>
+                <div v-if="parsedData">
+                    <p style="color: #aaa; margin: 15px 0 5px 0;">解析出的结构化参数：</p>
+                    <div class="json-block">{{ parsedData }}</div>
+                </div>
+            </div>
+        </div>
+        <div id="viewer"></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        const { createApp, ref, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const instruction = ref('');
+                const loading = ref(false);
+                const statusMsg = ref('等待用户输入指令...');
+                const parsedData = ref('');
+
+                let scene, camera, renderer, currentMesh;
+
+                // 1. 初始化 Three.js 舞台
+                const initThreeJS = () => {
+                    const container = document.getElementById('viewer');
+                    scene = new THREE.Scene();
+                    scene.background = new THREE.Color(0x2d2d30); // 工业深灰背景
+
+                    camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 1000);
+                    camera.position.set(150, 150, 200);
+
+                    renderer = new THREE.WebGLRenderer({ antialias: true });
+                    renderer.setSize(container.clientWidth, container.clientHeight);
+                    container.appendChild(renderer.domElement);
+
+                    // 允许鼠标拖拽旋转和缩放模型
+                    const controls = new OrbitControls(camera, renderer.domElement);
+                    controls.enableDamping = true;
+
+                    // 添加光影效果，让模型看起来更有质感
+                    scene.add(new THREE.AmbientLight(0x404040, 2));
+                    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+                    directionalLight.position.set(100, 200, 100);
+                    scene.add(directionalLight);
+
+                    // 添加底部网格辅助线
+                    scene.add(new THREE.GridHelper(300, 60, 0x555555, 0x444444));
+
+                    const animate = () => {
+                        requestAnimationFrame(animate);
+                        controls.update();
+                        renderer.render(scene, camera);
+                    };
+                    animate();
+
+                    window.addEventListener('resize', () => {
+                        camera.aspect = container.clientWidth / container.clientHeight;
+                        camera.updateProjectionMatrix();
+                        renderer.setSize(container.clientWidth, container.clientHeight);
+                    });
+                };
+
+                onMounted(() => {
+                    initThreeJS();
+                });
+
+                // 2. 将自然语言发送给 Python 后端
+                const generateCAD = async () => {
+                    if (!instruction.value.trim()) {
+                        alert('指令不能为空！');
+                        return;
+                    }
+                    loading.value = true;
+                    statusMsg.value = '正在将指令发送给大模型进行语义解析...';
+                    parsedData.value = '';
+
+                    try {
+                        const response = await axios.post('http://127.0.0.1:5000/api/generate', {
+                            instruction: instruction.value
+                        });
+
+                        const data = response.data;
+                        if (data.status === 'success') {
+                            statusMsg.value = '参数化建模指令生成成功！正在调用 FreeCAD API 并渲染...';
+                            parsedData.value = JSON.stringify(data.parsed_params, null, 2);
+
+                            // 拿到后端生成的模型路径，交给 Three.js 渲染
+                            loadSTL(`http://127.0.0.1:5000${data.model_url}`);
+                        } else {
+                            statusMsg.value = `❌ 发生错误: ${data.message}`;
+                        }
+                    } catch (error) {
+                        statusMsg.value = `❌ 网络请求失败: 请检查后端服务器是否运行。`;
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                // 3. 将后端传回的 3D 模型渲染到页面上
+                const loadSTL = (url) => {
+                    const loader = new STLLoader();
+                    // 加个时间戳，防止浏览器缓存旧模型
+                    loader.load(`${url}?t=${new Date().getTime()}`, (geometry) => {
+                        if (currentMesh) {
+                            scene.remove(currentMesh); // 删掉旧模型
+                        }
+                        geometry.center(); // 将模型居中
+                        geometry.computeVertexNormals();
+
+                        // 设置一个酷炫的工业绿色材质
+                        const material = new THREE.MeshStandardMaterial({
+                            color: 0x4fc08d,
+                            metalness: 0.2,
+                            roughness: 0.5
+                        });
+                        currentMesh = new THREE.Mesh(geometry, material);
+
+                        // 为了防止模型太大或太小，稍微调整一下初始视角
+                        currentMesh.geometry.computeBoundingSphere();
+                        const radius = currentMesh.geometry.boundingSphere.radius;
+                        camera.position.set(radius * 2, radius * 2, radius * 2);
+
+                        scene.add(currentMesh);
+                        statusMsg.value = '✅ 渲染完成！你可以在右侧拖拽鼠标旋转查看 3D 模型了。';
+                    });
+                };
+
+                return { instruction, loading, statusMsg, parsedData, generateCAD };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
