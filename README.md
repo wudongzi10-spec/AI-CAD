@@ -60,9 +60,12 @@ AutoCAD_Project/
 ├─ config.py                  # 环境变量与运行配置
 ├─ index.html                 # 前端工作台页面
 ├─ README.md                  # 项目说明
-├─ README_PUBLIC_DEMO.md      # 公开演示部署说明
+├─ README_PUBLIC_DEMO.md      # 公开演示与固定域名部署说明
 ├─ requirements.txt           # Python 依赖
 ├─ start_demo_backend.ps1     # Windows 下的演示启动脚本
+├─ .github/workflows/         # GitHub Actions 自托管部署工作流
+├─ cloudflared/               # Cloudflare Tunnel 配置模板
+├─ scripts/                   # 本地启动、Tunnel、重启部署脚本
 ├─ core/
 │  ├─ cad_engine.py           # JSON 蓝图 -> FreeCAD -> STL
 │  ├─ llm_parser.py           # 自然语言 -> JSON 蓝图
@@ -110,7 +113,8 @@ FREECAD_BIN_PATH=E:\FreeCAD 1.0\bin
 
 APP_HOST=0.0.0.0
 APP_PORT=5001
-APP_CORS_ORIGINS=
+APP_PUBLIC_URL=https://cad.wudz.cloud
+APP_CORS_ORIGINS=https://cad.wudz.cloud
 MAX_HISTORY_LIMIT=200
 
 DEMO_MODE=false
@@ -148,6 +152,20 @@ python app.py
 ```powershell
 & "E:\FreeCAD 1.0\bin\python.exe" app.py
 ```
+
+Windows 演示环境也可以使用项目脚本读取 `.env` 并启动：
+
+```powershell
+.\scripts\Start-AiCadBackend.ps1
+```
+
+需要固定公网域名时，请使用 Cloudflare Named Tunnel。当前推荐子域名为：
+
+```text
+https://cad.wudz.cloud
+```
+
+完整步骤见 [README_PUBLIC_DEMO.md](README_PUBLIC_DEMO.md)。
 
 ## 主要页面与接口
 
@@ -218,4 +236,4 @@ python -m unittest discover -s test -p "test_*.py"
 
 ## 相关文档
 
-- [README_PUBLIC_DEMO.md](README_PUBLIC_DEMO.md)：公开演示与 Cloudflare Tunnel 使用说明
+- [README_PUBLIC_DEMO.md](README_PUBLIC_DEMO.md)：通过 GitHub Actions self-hosted runner 和 Cloudflare Named Tunnel 部署到固定域名 `cad.wudz.cloud`

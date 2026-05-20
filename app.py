@@ -14,6 +14,7 @@ from config import (
     APP_CORS_ORIGINS,
     APP_HOST,
     APP_PORT,
+    APP_PUBLIC_URL,
     BASE_DIR,
     DEMO_ACCESS_CODE,
     DEMO_ALLOW_DELETE,
@@ -124,12 +125,25 @@ def _get_client_identifier():
     return (request.remote_addr or "unknown").strip()
 
 
+def _is_loopback_host():
+    if not has_request_context():
+        return True
+
+    host = (request.host or "").strip().lower()
+    if host.startswith("[") and "]" in host:
+        host_name = host[1 : host.index("]")]
+    else:
+        host_name = host.split(":", 1)[0]
+
+    return host_name in {"127.0.0.1", "::1", "localhost"}
+
+
 def _is_local_request():
     if not has_request_context():
         return True
 
     client_id = _get_client_identifier()
-    return client_id in {"127.0.0.1", "::1", "localhost"}
+    return client_id in {"127.0.0.1", "::1", "localhost"} and _is_loopback_host()
 
 
 def _has_admin_access():
@@ -298,6 +312,7 @@ def _public_runtime_config():
     return {
         "demo_mode": DEMO_MODE,
         "demo_name": DEMO_NAME,
+        "public_url": APP_PUBLIC_URL,
         "requires_access_code": bool(DEMO_ACCESS_CODE),
         "show_history": DEMO_SHOW_HISTORY,
         "allow_generate": DEMO_ALLOW_GENERATE,

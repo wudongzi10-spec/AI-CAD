@@ -35,7 +35,8 @@ FREECAD_BIN_PATH = os.getenv("FREECAD_BIN_PATH", r"E:\FreeCAD 1.0\bin")
 FREECAD_PYTHON_PATH = os.getenv("FREECAD_PYTHON_PATH", os.path.join(FREECAD_BIN_PATH, "python.exe"))
 
 APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
-APP_PORT = _env_int("APP_PORT", 5001, minimum=1, maximum=65535)
+APP_PORT = _env_int("APP_PORT", _env_int("PORT", 5001, minimum=1, maximum=65535), minimum=1, maximum=65535)
+APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "").strip().rstrip("/")
 MAX_HISTORY_LIMIT = _env_int("MAX_HISTORY_LIMIT", 200, minimum=1, maximum=500)
 APP_CORS_ORIGINS = [origin.strip() for origin in os.getenv("APP_CORS_ORIGINS", "").split(",") if origin.strip()]
 

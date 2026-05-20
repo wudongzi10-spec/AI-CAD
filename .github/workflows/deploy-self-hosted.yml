@@ -1,0 +1,74 @@
+name: Deploy AI-CAD
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy on Windows self-hosted runner
+    runs-on:
+      - self-hosted
+      - Windows
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        shell: powershell
+
+    env:
+      FREECAD_BIN_PATH: ${{ vars.FREECAD_BIN_PATH || 'E:\FreeCAD 1.0\bin' }}
+      FREECAD_PYTHON_PATH: ${{ vars.FREECAD_PYTHON_PATH || 'E:\FreeCAD 1.0\bin\python.exe' }}
+      APP_HOST: 127.0.0.1
+      APP_PORT: 5001
+      APP_PUBLIC_URL: https://cad.wudz.cloud
+      APP_CORS_ORIGINS: https://cad.wudz.cloud
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Write runtime environment
+        run: |
+          @"
+          LLM_API_KEY=${{ secrets.LLM_API_KEY }}
+          LLM_PROVIDER=${{ vars.LLM_PROVIDER || 'moonshot' }}
+          LLM_API_BASE_URL=${{ vars.LLM_API_BASE_URL || 'https://api.moonshot.cn/v1' }}
+          LLM_MODEL=${{ vars.LLM_MODEL || 'moonshot-v1-8k' }}
+          LLM_TIMEOUT=${{ vars.LLM_TIMEOUT || '60' }}
+          FREECAD_BIN_PATH=$env:FREECAD_BIN_PATH
+          FREECAD_PYTHON_PATH=$env:FREECAD_PYTHON_PATH
+          APP_HOST=$env:APP_HOST
+          APP_PORT=$env:APP_PORT
+          APP_PUBLIC_URL=$env:APP_PUBLIC_URL
+          APP_CORS_ORIGINS=$env:APP_CORS_ORIGINS
+          MAX_HISTORY_LIMIT=200
+          DEMO_MODE=true
+          DEMO_NAME=AI-CAD Public Demo
+          DEMO_ACCESS_CODE=${{ secrets.DEMO_ACCESS_CODE }}
+          DEMO_SHOW_HISTORY=true
+          DEMO_ALLOW_GENERATE=true
+          DEMO_ALLOW_DELETE=false
+          DEMO_ALLOW_DOWNLOAD=true
+          DEMO_MAX_INSTRUCTION_LENGTH=240
+          DEMO_RATE_LIMIT_WINDOW_SECONDS=300
+          DEMO_RATE_LIMIT_MAX_REQUESTS=6
+          DEMO_HISTORY_LIMIT=20
+          ADMIN_ACCESS_CODE=${{ secrets.ADMIN_ACCESS_CODE }}
+          "@ | Set-Content -LiteralPath ".env" -Encoding UTF8
+
+      - name: Install Python dependencies
+        run: |
+          & "$env:FREECAD_PYTHON_PATH" -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: |
+          & "$env:FREECAD_PYTHON_PATH" -m py_compile app.py config.py core\llm_parser.py core\cad_engine.py core\prompt_templates.py database\db_manager.py
+
+      - name: Restart local deployment
+        run: |
+          .\scripts\Restart-AiCadDeployment.ps1 -ProjectRoot "$PWD" -PythonPath "$env:FREECAD_PYTHON_PATH"

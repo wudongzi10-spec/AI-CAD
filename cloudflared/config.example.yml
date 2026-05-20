@@ -1,0 +1,7 @@
+tunnel: YOUR_TUNNEL_UUID
+credentials-file: C:\Users\YOUR_USER\.cloudflared\YOUR_TUNNEL_UUID.json
+
+ingress:
+  - hostname: cad.wudz.cloud
+    service: http://127.0.0.1:5001
+  - service: http_status:404
