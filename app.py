@@ -85,6 +85,31 @@ def _normalize_source_record_id(value):
         raise ValueError("source_record_id must be an integer.") from exc
 
 
+def _detect_unsupported_instruction(instruction):
+    normalized = (instruction or "").strip().lower()
+    unsupported_terms = [
+        "十二面体",
+        "二十面体",
+        "多面体",
+        "正多面体",
+        "皮卡丘",
+        "卡通",
+        "人物",
+        "动物",
+        "生物",
+        "有机体",
+    ]
+    matched_terms = [term for term in unsupported_terms if term in normalized]
+    if not matched_terms:
+        return ""
+
+    return (
+        "当前系统仅支持基础参数化几何体与基础布尔建模，"
+        f"暂不支持“{matched_terms[0]}”这类复杂自由形体或未声明几何体。"
+        "请使用长方体、圆柱体、球体、圆锥体、圆环体及 cut/fuse/common 运算进行测试。"
+    )
+
+
 def _remove_file_with_retry(file_path, retries=5, delay=0.2):
     if not os.path.exists(file_path):
         return True
@@ -457,6 +482,16 @@ def generate_model():
 
     if not instruction:
         return _json_error("Instruction cannot be empty.", 400)
+
+    unsupported_message = _detect_unsupported_instruction(instruction)
+    if unsupported_message:
+        db.insert_history(
+            instruction=instruction,
+            status=f"error: {unsupported_message}",
+            template_id=template_id,
+            source_record_id=source_record_id,
+        )
+        return _json_error(unsupported_message, 400)
 
     if DEMO_MODE and len(instruction) > DEMO_MAX_INSTRUCTION_LENGTH:
         return _json_error(

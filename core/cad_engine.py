@@ -8,6 +8,14 @@ from config import FREECAD_BIN_PATH, FREECAD_PYTHON_PATH, STATIC_DIR
 FreeCAD = None
 Part = None
 FREECAD_IMPORT_ERROR = None
+SUPPORTED_FREECAD_TYPES = {
+    "Part::Box": {"Length", "Width", "Height"},
+    "Part::Cylinder": {"Radius", "Height"},
+    "Part::Sphere": {"Radius"},
+    "Part::Cone": {"Radius1", "Radius2", "Height"},
+    "Part::Torus": {"Radius1", "Radius2"},
+}
+SUPPORTED_BOOLEAN_TYPES = {"cut", "fuse", "common"}
 
 
 def _is_freecad_python_runtime():
@@ -68,12 +76,14 @@ class CADBuilder:
         self.final_exports = []
 
     def execute_blueprint(self, blueprint_dict):
+        self._validate_blueprint(blueprint_dict)
         objects_data = blueprint_dict.get("objects", [])
         operations_data = blueprint_dict.get("operations", [])
+        align_targets = self._build_align_target_map(objects_data)
 
         self._build_shapes(objects_data)
         self._apply_spatial_constraints(objects_data)
-        self._ensure_boolean_tool_overlap(operations_data)
+        self._ensure_boolean_tool_overlap(operations_data, align_targets)
         self._apply_booleans(operations_data)
         return self._export_model()
 
@@ -85,6 +95,90 @@ class CADBuilder:
             return float(default)
 
     @classmethod
+    def _validate_blueprint(cls, blueprint_dict):
+        if not isinstance(blueprint_dict, dict):
+            raise ValueError("CAD blueprint must be a JSON object.")
+
+        objects_data = blueprint_dict.get("objects", [])
+        if not isinstance(objects_data, list) or not objects_data:
+            raise ValueError("CAD blueprint must contain at least one object.")
+
+        object_ids = set()
+        for index, obj_data in enumerate(objects_data, start=1):
+            if not isinstance(obj_data, dict):
+                raise ValueError(f"CAD object #{index} must be a JSON object.")
+
+            obj_id = (obj_data.get("id") or "").strip()
+            if not obj_id:
+                raise ValueError(f"CAD object #{index} is missing an id.")
+            if obj_id in object_ids:
+                raise ValueError(f"Duplicate CAD object id: {obj_id}.")
+            object_ids.add(obj_id)
+
+        for index, obj_data in enumerate(objects_data, start=1):
+            obj_id = (obj_data.get("id") or "").strip()
+            freecad_type = (obj_data.get("freecad_type") or "").strip()
+            if freecad_type not in SUPPORTED_FREECAD_TYPES:
+                supported_types = ", ".join(sorted(SUPPORTED_FREECAD_TYPES))
+                raise ValueError(
+                    f"Unsupported CAD primitive '{freecad_type or '<missing>'}' for object '{obj_id}'. "
+                    f"Supported primitives are: {supported_types}."
+                )
+
+            properties = obj_data.get("properties", {})
+            if not isinstance(properties, dict):
+                raise ValueError(f"Properties for object '{obj_id}' must be a JSON object.")
+
+            allowed_properties = SUPPORTED_FREECAD_TYPES[freecad_type]
+            unknown_properties = sorted(set(properties) - allowed_properties)
+            if unknown_properties:
+                raise ValueError(
+                    f"Unsupported properties for object '{obj_id}': {', '.join(unknown_properties)}."
+                )
+
+            missing_properties = sorted(allowed_properties - set(properties))
+            if missing_properties:
+                raise ValueError(
+                    f"Missing required properties for object '{obj_id}': {', '.join(missing_properties)}."
+                )
+
+            for prop_name, prop_value in properties.items():
+                numeric_value = cls._coerce_number(prop_value, default=None)
+                if numeric_value is None:
+                    raise ValueError(f"Property '{prop_name}' for object '{obj_id}' must be numeric.")
+                if prop_name != "Radius2" and numeric_value <= 0:
+                    raise ValueError(f"Property '{prop_name}' for object '{obj_id}' must be greater than 0.")
+                if prop_name == "Radius2" and numeric_value < 0:
+                    raise ValueError(f"Property '{prop_name}' for object '{obj_id}' cannot be negative.")
+
+            align = obj_data.get("align")
+            if isinstance(align, dict):
+                target_id = (align.get("target") or "").strip()
+                if target_id and target_id.lower() not in {"origin", "world", "global"} and target_id not in object_ids:
+                    raise ValueError(f"Object '{obj_id}' aligns to unknown target '{target_id}'.")
+
+        operations_data = blueprint_dict.get("operations", [])
+        if operations_data is None:
+            return
+        if not isinstance(operations_data, list):
+            raise ValueError("CAD operations must be an array.")
+
+        for index, op in enumerate(operations_data, start=1):
+            if not isinstance(op, dict):
+                raise ValueError(f"CAD operation #{index} must be a JSON object.")
+
+            op_type = (op.get("type") or "").strip()
+            if op_type not in SUPPORTED_BOOLEAN_TYPES:
+                raise ValueError(f"Unsupported boolean operation '{op_type or '<missing>'}'.")
+
+            base_id = op.get("base")
+            tool_id = op.get("tool")
+            if base_id not in object_ids:
+                raise ValueError(f"Operation #{index} references unknown base object '{base_id}'.")
+            if tool_id not in object_ids:
+                raise ValueError(f"Operation #{index} references unknown tool object '{tool_id}'.")
+
+    @classmethod
     def _extract_offset_vector(cls, align):
         align = align or {}
         offset = align.get("offset") or {}
@@ -93,6 +187,30 @@ class CADBuilder:
             "y": cls._coerce_number(offset.get("y", 0)),
             "z": cls._coerce_number(offset.get("z", 0)),
         }
+
+    @staticmethod
+    def _build_align_target_map(objects_data):
+        align_targets = {}
+        for obj_data in objects_data:
+            obj_id = obj_data.get("id")
+            align = obj_data.get("align") or {}
+            target_id = (align.get("target") or "").strip()
+            if not obj_id or not target_id:
+                continue
+            if target_id.lower() in {"origin", "world", "global"}:
+                continue
+            align_targets[obj_id] = target_id
+        return align_targets
+
+    @staticmethod
+    def _resolve_boolean_anchor_id(op, align_targets):
+        base_id = op.get("base")
+        if op.get("type") != "fuse":
+            return base_id
+
+        tool_id = op.get("tool")
+        target_id = align_targets.get(tool_id)
+        return target_id or base_id
 
     @staticmethod
     def _bound_box_to_axes(bound_box):
@@ -161,7 +279,7 @@ class CADBuilder:
         return float(bound_box.ZMax - bound_box.ZMin)
 
     @classmethod
-    def _normalize_face_alignment_offset(cls, align_type, offset, target_box):
+    def _normalize_face_alignment_offset(cls, align_type, offset, target_box, current_box=None):
         normalized = dict(offset)
         axis_map = {
             "top_center": ("z", 1.0),
@@ -177,11 +295,18 @@ class CADBuilder:
 
         axis, direction = axis_info
         face_distance = cls._axis_span(target_box, axis) / 2.0
+        target_span = cls._axis_span(target_box, axis)
         offset_value = cls._coerce_number(normalized.get(axis, 0.0))
-        tolerance = max(1e-4, face_distance * 0.05)
+        duplicated_distances = [face_distance, target_span]
+        if current_box is not None:
+            current_span = cls._axis_span(current_box, axis)
+            duplicated_distances.extend([current_span / 2.0, current_span])
 
-        if face_distance > 0 and offset_value * direction > 0 and abs(abs(offset_value) - face_distance) <= tolerance:
-            normalized[axis] = offset_value - direction * face_distance
+        for distance in duplicated_distances:
+            tolerance = max(1e-4, distance * 0.05)
+            if distance > 0 and offset_value * direction > 0 and abs(abs(offset_value) - distance) <= tolerance:
+                normalized[axis] = offset_value - direction * distance
+                break
 
         return normalized
 
@@ -262,13 +387,15 @@ class CADBuilder:
                 move_vec.z = (target_box.ZMax + target_box.ZMin) / 2 - (current_box.ZMax + current_box.ZMin) / 2
 
             offset = self._extract_offset_vector(align)
-            offset = self._normalize_face_alignment_offset(align_type, offset, target_box)
+            offset = self._normalize_face_alignment_offset(align_type, offset, target_box, current_box)
             move_vec += FreeCAD.Vector(offset["x"], offset["y"], offset["z"])
             curr_obj.Placement.Base += move_vec
+            self.doc.recompute()
 
         self.doc.recompute()
 
-    def _ensure_boolean_tool_overlap(self, operations_data):
+    def _ensure_boolean_tool_overlap(self, operations_data, align_targets=None):
+        align_targets = align_targets or {}
         for op in operations_data:
             op_type = op.get("type")
             if op_type not in {"cut", "fuse"}:
@@ -281,7 +408,11 @@ class CADBuilder:
             if not (base_obj and tool_obj):
                 continue
 
-            base_axes = self._bound_box_to_axes(base_obj.Shape.BoundBox)
+            anchor_id = self._resolve_boolean_anchor_id(op, align_targets)
+            anchor_obj = self.created_parts.get(anchor_id) or base_obj
+            anchor_id = anchor_id if anchor_obj is not base_obj else base_id
+
+            base_axes = self._bound_box_to_axes(anchor_obj.Shape.BoundBox)
             tool_axes = self._bound_box_to_axes(tool_obj.Shape.BoundBox)
             adjustment = self._calculate_boolean_overlap_adjustment(base_axes, tool_axes, op_type)
             if not adjustment:
@@ -295,7 +426,7 @@ class CADBuilder:
             self.doc.recompute()
             print(
                 f"[INFO] [CADEngine] Adjusted {op_type} tool '{tool_id}' "
-                f"against '{base_id}' by {adjustment} to ensure overlap."
+                f"against '{anchor_id}' by {adjustment} to ensure overlap."
             )
 
     def _apply_booleans(self, operations_data):

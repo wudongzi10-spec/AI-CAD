@@ -1,26 +1,27 @@
-# AI-CAD 自然语言驱动三维建模系统
+# AI-CAD 自然语言三维建模系统
 
-一个面向毕业设计、课程项目和原型验证场景的 AI-CAD 工作台。用户输入中文自然语言建模指令后，系统会先调用大语言模型解析出结构化建模蓝图，再通过 FreeCAD Python API 生成几何体、执行对齐与布尔运算，并导出 STL 供浏览器三维预览。
+AI-CAD 是一个面向毕业设计、课程项目和原型演示的中文自然语言 CAD 工作台。用户在浏览器中输入建模指令后，后端会调用 OpenAI 兼容的 Chat Completions 接口生成结构化 CAD 蓝图，再通过 FreeCAD Python API 创建几何体、执行空间对齐和布尔运算，最终导出 STL 并在前端用 Three.js 预览。
 
-## 项目概览
+## 当前能力
 
-- 中文自然语言转 CAD 建模蓝图
-- FreeCAD 自动生成三维模型并导出 STL
-- 支持模板库、历史记录、统计面板和公开演示模式
-- 支持多家 OpenAI 兼容接口，运行时可保存 LLM 配置
-- 前端为单文件页面，适合快速演示和部署
+- 中文自然语言解析为结构化 CAD JSON 蓝图。
+- 基于 FreeCAD 自动生成 STL 模型。
+- 支持模型历史、模板库、统计面板、STL 下载和历史复用。
+- 支持运行时配置 LLM Provider、Base URL、模型名和 API Key。
+- 支持公开演示模式：访问码、管理员口令、功能开关、输入长度限制和生成限流。
+- 支持 GitHub Actions self-hosted runner 配合 Cloudflare Named Tunnel 自动部署。
 
-## 核心能力
+## 支持范围
 
-### 当前支持的几何体
+当前支持的 FreeCAD 基础体：
 
-- `Part::Box`
-- `Part::Cylinder`
-- `Part::Sphere`
-- `Part::Cone`
-- `Part::Torus`
+- `Part::Box`：`Length`、`Width`、`Height`
+- `Part::Cylinder`：`Radius`、`Height`
+- `Part::Sphere`：`Radius`
+- `Part::Cone`：`Radius1`、`Radius2`、`Height`
+- `Part::Torus`：`Radius1`、`Radius2`
 
-### 当前支持的空间语义
+当前支持的空间对齐：
 
 - `top_center`
 - `bottom_center`
@@ -30,63 +31,49 @@
 - `back`
 - `center`
 
-### 当前支持的布尔运算
+当前支持的布尔运算：
 
 - `cut`
 - `fuse`
 - `common`
 
-## 系统流程
-
-1. 用户在前端输入自然语言建模指令，或从模板库、历史记录中复用指令。
-2. 后端调用 LLM，将自然语言解析为结构化 JSON 建模蓝图。
-3. `CADBuilder` 根据蓝图创建几何体、执行空间对齐与布尔运算。
-4. 生成结果导出为 STL 文件并记录到 SQLite。
-5. 前端使用 Three.js 加载模型并完成三维预览。
-
-## 技术栈
-
-- 后端：`Flask`、`Flask-CORS`
-- 前端：`Vue 3`、`Axios`、`Three.js`
-- 建模引擎：`FreeCAD Python API`
-- 大模型接入：OpenAI 兼容 `Chat Completions API`
-- 数据存储：`SQLite`
+系统会拒绝未声明的复杂自由形体或超出上述范围的几何体，避免 LLM 生成 FreeCAD 无法稳定执行的蓝图。
 
 ## 项目结构
 
 ```text
 AutoCAD_Project/
-├─ app.py                     # Flask 入口与 API
-├─ config.py                  # 环境变量与运行配置
-├─ index.html                 # 前端工作台页面
-├─ README.md                  # 项目说明
-├─ README_PUBLIC_DEMO.md      # 公开演示与固定域名部署说明
-├─ requirements.txt           # Python 依赖
-├─ start_demo_backend.ps1     # Windows 下的演示启动脚本
-├─ .github/workflows/         # GitHub Actions 自托管部署工作流
-├─ cloudflared/               # Cloudflare Tunnel 配置模板
-├─ scripts/                   # 本地启动、Tunnel、重启部署脚本
+├─ app.py                         # Flask 应用入口与 HTTP API
+├─ config.py                      # 环境变量、路径和运行配置
+├─ index.html                     # 单文件 Vue 3 + Three.js 前端工作台
+├─ requirements.txt               # Web 后端依赖
+├─ start_demo_backend.ps1         # 兼容旧入口的启动脚本
+├─ .github/workflows/             # GitHub Actions self-hosted 部署流程
+├─ cloudflared/                   # Cloudflare Tunnel 配置模板
+├─ scripts/
+│  ├─ Start-AiCadBackend.ps1      # 启动本地 Flask 后端
+│  ├─ Start-AiCadTunnel.ps1       # 启动 Cloudflare Named Tunnel
+│  └─ Restart-AiCadDeployment.ps1 # 重启本地部署
 ├─ core/
-│  ├─ cad_engine.py           # JSON 蓝图 -> FreeCAD -> STL
-│  ├─ llm_parser.py           # 自然语言 -> JSON 蓝图
-│  └─ prompt_templates.py     # 内置提示模板
+│  ├─ cad_engine.py               # CAD 蓝图校验、FreeCAD 建模和 STL 导出
+│  ├─ llm_parser.py               # 自然语言到 CAD 蓝图的 LLM 调用
+│  └─ prompt_templates.py         # 内置提示模板
 ├─ database/
-│  └─ db_manager.py           # 历史、统计与设置管理
-├─ static/                    # 运行期导出的模型文件
-├─ test/                      # 原型脚本与测试用例
-└─ tools/                     # 辅助工具
+│  └─ db_manager.py               # SQLite 历史、统计和设置管理
+├─ static/                        # 运行时导出的 STL 文件，默认不提交
+└─ test/
+   ├─ test_cad_engine.py          # CAD 引擎单元测试
+   └─ test_db_manager.py          # 数据库管理单元测试
 ```
 
-## 快速开始
+## 环境要求
 
-### 1. 环境要求
+- Python 3.10 或更高版本。
+- 已安装 FreeCAD 1.0，并可使用 FreeCAD 自带 Python。
+- 一个 OpenAI 兼容的 LLM API Key，例如 Moonshot、DeepSeek、OpenRouter、Qwen、SiliconFlow 或 OpenAI。
+- 现代浏览器。
 
-- Python 3.10 及以上
-- 已安装 FreeCAD，并且可以通过 Python API 调用
-- 可用的 OpenAI 兼容 LLM API Key
-- 现代浏览器
-
-### 2. 安装依赖
+安装 Python 依赖：
 
 ```bash
 pip install -r requirements.txt
@@ -94,15 +81,21 @@ pip install -r requirements.txt
 
 说明：
 
-- `requirements.txt` 只包含 Web 服务依赖
-- FreeCAD 需要本地单独安装
-- 前端依赖通过 CDN 加载，不需要额外构建
+- `requirements.txt` 只包含 Flask、CORS、dotenv 等 Web 服务依赖。
+- FreeCAD 需要在本机单独安装。
+- 前端依赖通过 CDN 加载，不需要前端构建步骤。
 
-### 3. 配置环境变量
+## 环境变量
 
-常用环境变量如下：
+复制模板后编辑：
 
-```bash
+```powershell
+Copy-Item .env.example .env
+```
+
+常用配置：
+
+```dotenv
 LLM_API_KEY=your_api_key
 LLM_PROVIDER=moonshot
 LLM_API_BASE_URL=https://api.moonshot.cn/v1
@@ -110,6 +103,7 @@ LLM_MODEL=moonshot-v1-8k
 LLM_TIMEOUT=60
 
 FREECAD_BIN_PATH=E:\FreeCAD 1.0\bin
+FREECAD_PYTHON_PATH=E:\FreeCAD 1.0\bin\python.exe
 
 APP_HOST=0.0.0.0
 APP_PORT=5001
@@ -131,65 +125,52 @@ DEMO_HISTORY_LIMIT=20
 ADMIN_ACCESS_CODE=
 ```
 
-补充说明：
+补充：
 
-- 如果数据库中已经保存过 LLM 配置，运行时会优先读取数据库配置
-- 同时兼容旧变量 `MOONSHOT_API_KEY`、`MOONSHOT_API_BASE_URL`、`MOONSHOT_MODEL`
-- 建议通过环境变量或本地数据库保存密钥，不要把真实 Key 写进代码仓库
+- 运行时保存到 SQLite 的 LLM 设置优先级高于环境变量。
+- 兼容旧变量：`MOONSHOT_API_KEY`、`MOONSHOT_API_BASE_URL`、`MOONSHOT_MODEL`、`MOONSHOT_TIMEOUT`。
+- `.env`、数据库、日志和生成的 STL 已被 `.gitignore` 忽略，不要把真实密钥提交到仓库。
 
-### 4. 启动项目
+## 启动
 
-```bash
-python app.py
-```
-
-默认访问地址：
-
-- `http://127.0.0.1:5001`
-
-如果你使用的是 FreeCAD 自带 Python，可以改用：
+推荐使用 FreeCAD 自带 Python：
 
 ```powershell
 & "E:\FreeCAD 1.0\bin\python.exe" app.py
 ```
 
-Windows 演示环境也可以使用项目脚本读取 `.env` 并启动：
+或使用项目脚本读取 `.env` 后启动：
 
 ```powershell
-.\scripts\Start-AiCadBackend.ps1
+.\scripts\Start-AiCadBackend.ps1 -NoRedirect
 ```
 
-需要固定公网域名时，请使用 Cloudflare Named Tunnel。当前推荐子域名为：
+默认访问地址：
 
 ```text
-https://cad.wudz.cloud
+http://127.0.0.1:5001
 ```
 
-完整步骤见 [README_PUBLIC_DEMO.md](README_PUBLIC_DEMO.md)。
+公开演示和固定域名部署见 [README_PUBLIC_DEMO.md](README_PUBLIC_DEMO.md)。
 
-## 主要页面与接口
+## API
 
-### 页面能力
+主要接口：
 
-- 工作台首页：系统状态、LLM 配置、模板库、建模输入和实时反馈
-- 历史记录页：历史查询、详情查看、再次生成、删除联动清理和 STL 下载
-- 公开演示模式：支持访问码、管理员口令、功能开关和速率限制
-
-### 主要 API
-
+- `GET /`、`GET /index.html`
 - `GET /api/public-config`
 - `GET /api/health`
-- `GET /api/stats`
-- `GET /api/templates`
 - `GET /api/settings/llm`
 - `POST /api/settings/llm`
+- `GET /api/stats`
+- `GET /api/templates`
 - `POST /api/generate`
 - `GET /api/history`
 - `GET /api/history/<id>`
 - `DELETE /api/history/<id>`
 - `GET /api/download?path=...`
 
-`POST /api/generate` 请求示例：
+生成模型请求示例：
 
 ```json
 {
@@ -203,37 +184,19 @@ https://cad.wudz.cloud
 
 语法编译：
 
-```bash
-python -m py_compile app.py config.py core\llm_parser.py core\cad_engine.py core\prompt_templates.py database\db_manager.py
+```powershell
+& "E:\FreeCAD 1.0\bin\python.exe" -m py_compile app.py config.py core\llm_parser.py core\cad_engine.py core\prompt_templates.py database\db_manager.py
 ```
 
 单元测试：
 
-```bash
-python -m unittest discover -s test -p "test_*.py"
+```powershell
+& "E:\FreeCAD 1.0\bin\python.exe" -m unittest discover -s test -p "test_*.py"
 ```
-
-## 适用场景
-
-- AI + CAD 毕业设计或课程项目展示
-- 中文自然语言建模原型验证
-- FreeCAD 自动化建模实验
-- OpenAI 兼容接口接入示例
 
 ## 当前限制
 
-- 当前仍以基础几何体、基础对齐与基础布尔运算为主
-- 建模效果依赖外部 LLM 的解析质量
-- 前端目前是单文件页面，更偏向原型和演示
-- 自动化测试覆盖仍有提升空间
-
-## 后续优化方向
-
-- 扩展更多几何体、参数约束和装配语义
-- 完善前后端工程化拆分与自动化测试
-- 增强错误提示、输入校验和任务调度能力
-- 提升公开演示模式下的安全性与治理能力
-
-## 相关文档
-
-- [README_PUBLIC_DEMO.md](README_PUBLIC_DEMO.md)：通过 GitHub Actions self-hosted runner 和 Cloudflare Named Tunnel 部署到固定域名 `cad.wudz.cloud`
+- 仍以基础参数化几何体、基础空间对齐和基础布尔运算为主。
+- 建模质量依赖外部 LLM 对自然语言的解析质量。
+- FreeCAD 必须在实际运行后端的机器上安装，GitHub Pages 无法直接运行本项目后端。
+- 前端目前是单文件工作台，适合演示和原型，不是完整工程化前端项目。
